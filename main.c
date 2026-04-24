@@ -1,3 +1,6 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 #include "process.h"
 #include "utils.h"
 #include "fifo.h"
@@ -5,29 +8,60 @@
 #include "sjf.h"
 #include "srtf.h"
 
-int main() {
-    Process original[N] = {
-        {0, 4, 4, 0},
-        {1, 2, 2, 1},
-        {2, 6, 6, 2},
-        {3, 3, 3, 3},
-        {4, 1, 1, 4},
-        {5, 5, 5, 5}
-    };
+int main(void) {
+    int quantum;
 
-    Process p[N];
+    /*
+       Esta parte inicializamos la semilla random.
+       time(NULL) cambia con cada ejecucion, entonces rand() genera datasets diferentes
+    */
+    srand(time(NULL));
 
-    resetProcesses(p, original);
-    FIFO(p);
+    printf("CPU Scheduling Simulation\n");
+    printf("Enter quantum for Round Robin: ");
+    scanf("%d", &quantum);
 
-    resetProcesses(p, original);
-    RoundRobin(p);
+    // Verificamos que el quantum sea valido para evitar ciclos incorrectos
+    if (quantum <= 0) {
+        printf("Invalid quantum. Using quantum = 2.\n");
+        quantum = 2;
+    }
 
-    resetProcesses(p, original);
-    SJF(p);
+    int n = 0;
 
-    resetProcesses(p, original);
-    SRTF(p);
+    // Generamos una sola lista original para que todos los algoritmos usen el mismo dataset
+    Process *original = generateProcesses(&n);
+    Process *work = malloc(sizeof(Process) * n);
 
+    if (work == NULL) {
+        printf("Memory allocation error.\n");
+        free(original);
+        return 1;
+    }
+
+    printf("\nThread range: %d-%d | Burst range: %d-%d | Arrival range: %d-%d\n",
+           MIN_THREADS, MAX_THREADS, MIN_BURST, MAX_BURST, MIN_ARRIVAL, MAX_ARRIVAL);
+    printf("Round Robin Quantum: %d\n\n", quantum);
+
+    printDataset(original, n);
+
+    /*
+       Antes de cada algoritmo copiamos original a work,
+       asi FIFO, RR, SJF y SRTF se comparan justamente con los mismos procesos.
+    */
+    resetProcesses(work, original, n);
+    FIFO(work, n);
+
+    resetProcesses(work, original, n);
+    RoundRobin(work, n, quantum);
+
+    resetProcesses(work, original, n);
+    SJF(work, n);
+
+    resetProcesses(work, original, n);
+    SRTF(work, n);
+
+    free(work);
+    free(original);
     return 0;
 }

@@ -1,47 +1,67 @@
 #include <stdio.h>
 #include <limits.h>
+#include <time.h>
 #include "sjf.h"
 #include "utils.h"
 
-// Shortest Job First scheduling
-void SJF(Process p[]) {
-    printf("\n--- SJF Scheduling ---\n");
+void SJF(Process p[], int n) {
+    printf("--- SJF Scheduling ---\n");
 
-    int time = 0, completed = 0;
-    int done[N] = {0};
+    time_t base = time(NULL);
+    int timeNow = 0;
+    int completed = 0;
+    int done[MAX_THREADS] = {0};
+    GanttBlock gantt[MAX_GANTT_BLOCKS];
+    int ganttCount = 0;
+    int firstStartedPrinted = 0;
 
-    while (completed < N) {
+    while (completed < n) {
         int idx = -1;
-        int minBurst = INT_MAX;
+        int shortestBurst = INT_MAX;
 
-        // Find shortest available process
-        for (int i = 0; i < N; i++) {
-            if (!done[i] && p[i].arrival <= time && p[i].burst < minBurst) {
-                minBurst = p[i].burst;
+        /*
+           Buscamos entre los procesos que ya llegaron y todavia no terminaron.
+           Se elige el burst mas corto pero no se hace preempt una vez que empieza.
+        */
+        for (int i = 0; i < n; i++) {
+            if (!done[i] && p[i].arrival <= timeNow && p[i].burst < shortestBurst) {
+                shortestBurst = p[i].burst;
                 idx = i;
             }
         }
 
-        // If no process is ready, advance time
+        // Si no hay procesos disponibles, avanzamos hasta la siguiente llegada
         if (idx == -1) {
-            time++;
+            int nextArrival = INT_MAX;
+            for (int i = 0; i < n; i++) {
+                if (!done[i] && p[i].arrival < nextArrival) {
+                    nextArrival = p[i].arrival;
+                }
+            }
+            addGanttBlock(gantt, &ganttCount, -1, timeNow, nextArrival);
+            timeNow = nextArrival;
             continue;
         }
 
-        printf("Time %d: Process %d started\n", time, p[idx].id);
+        p[idx].start = timeNow;
+        p[idx].waiting = p[idx].start - p[idx].arrival;
 
-        p[idx].waiting = time - p[idx].arrival;
+        logProcessStart(base, timeNow, &p[idx], !firstStartedPrinted);
+        firstStartedPrinted = 1;
 
-        time += p[idx].burst;
+        addGanttBlock(gantt, &ganttCount, p[idx].id, timeNow, timeNow + p[idx].burst);
 
-        p[idx].completion = time;
-        p[idx].turnaround = time - p[idx].arrival;
+        simulateCpuBurst(p[idx].burst);
+        timeNow += p[idx].burst;
 
-        printf("Time %d: Process %d completed\n", time, p[idx].id);
-
+        p[idx].completion = timeNow;
+        p[idx].turnaround = p[idx].completion - p[idx].arrival;
         done[idx] = 1;
         completed++;
+
+        logProcessEvent(base, timeNow, &p[idx], "Completed");
     }
 
-    printStats(p);
+    printGanttChart(gantt, ganttCount);
+    printStats(p, n);
 }

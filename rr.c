@@ -1,67 +1,108 @@
 #include <stdio.h>
+#include <time.h>
 #include "rr.h"
 #include "utils.h"
 
-// Round Robin
-void RoundRobin(Process p[]) {
-    printf("\n--- Round Robin Scheduling ---\n");
+void RoundRobin(Process p[], int n, int quantum) {
+    printf("--- Round Robin Scheduling (Quantum %d) ---\n", quantum);
 
-    int time = 0, completed = 0;
-    int queue[100], front = 0, rear = 0;
-    int visited[N] = {0}; // tracks which processes are in queue
+    time_t base = time(NULL);
+    int timeNow = 0;
+    int completed = 0;
 
-    // add processes that arrive at time 0
-    for (int i = 0; i < N; i++) {
-        if (p[i].arrival == 0) {
-            queue[rear++] = i;
-            visited[i] = 1;
+    /*
+       Queue circular/simple para guardar los indices de procesos listos.
+       Usamos indices del arreglo p[], no ids, porque p[] ya contiene toda la informacion.
+    */
+    int queue[1000];
+    int front = 0;
+    int rear = 0;
+
+    // added evita meter el mismo proceso dos veces a la cola cuando ya llego
+    int added[MAX_THREADS] = {0};
+
+    GanttBlock gantt[MAX_GANTT_BLOCKS];
+    int ganttCount = 0;
+    int firstStartedPrinted = 0;
+
+    while (completed < n) {
+        // Agregamos a la cola todos los procesos que ya llegaron al tiempo actual
+        for (int i = 0; i < n; i++) {
+            if (!added[i] && p[i].arrival <= timeNow) {
+                queue[rear++] = i;
+                added[i] = 1;
+            }
         }
-    }
 
-    while (completed < N) {
-        // if queue empty, advance time
+        /*
+           Si la cola esta vacia, la CPU queda IDLE hasta la proxima llegada.
+           Asi evitamos avanzar tiempo de uno en uno innecesariamente.
+        */
         if (front == rear) {
-            time++;
-            // check for new arrivals
-            for (int i = 0; i < N; i++) {
-                if (!visited[i] && p[i].arrival <= time) {
-                    queue[rear++] = i;
-                    visited[i] = 1;
+            int nextArrival = 1000000;
+            for (int i = 0; i < n; i++) {
+                if (!added[i] && p[i].arrival < nextArrival) {
+                    nextArrival = p[i].arrival;
                 }
             }
+            addGanttBlock(gantt, &ganttCount, -1, timeNow, nextArrival);
+            timeNow = nextArrival;
             continue;
         }
 
-        int i = queue[front++]; // get next process
+        // Sacamos el siguiente proceso de la cola FIFO de Round Robin
+        int idx = queue[front++];
 
-        // Check the remaining time and execute for quantum or remaining time
-        int exec = (p[i].remaining > QUANTUM) ? QUANTUM : p[i].remaining;
+        if (p[idx].start == -1) {
+            p[idx].start = timeNow;
+        }
 
-        printf("Time %d: Process %d running\n", time, p[i].id);
+        logProcessStart(base, timeNow, &p[idx], !firstStartedPrinted);
+        firstStartedPrinted = 1;
 
-        p[i].remaining -= exec;
-        time += exec;
+        /*
+           Ya que el proceso ejecuta como maximo quantum,
+           si le queda menos que quantum, solo ejecuta lo que le falta.
+        */
+        int execTime;
+        if (p[idx].remaining > quantum) {
+            execTime = quantum;
+        } else {
+            execTime = p[idx].remaining;
+        }
 
-        // Add new arrivals to the queue
-        for (int j = 0; j < N; j++) {
-            if (!visited[j] && p[j].arrival <= time) {
-                queue[rear++] = j;
-                visited[j] = 1;
+        addGanttBlock(gantt, &ganttCount, p[idx].id, timeNow, timeNow + execTime);
+
+        simulateCpuBurst(execTime);
+        p[idx].remaining -= execTime;
+        timeNow += execTime;
+
+        /*
+           Despues de ejecutar, revisamos si llegaron procesos durante ese quantum,
+           esos procesos se agregan antes de reinsertar el proceso actual.
+        */
+        for (int i = 0; i < n; i++) {
+            if (!added[i] && p[i].arrival <= timeNow) {
+                queue[rear++] = i;
+                added[i] = 1;
             }
         }
 
-        if (p[i].remaining > 0) {
-            // If not finished, add back to queue
-            queue[rear++] = i;
+        if (p[idx].remaining > 0) {
+            // Si todavia le falta CPU, se preempta y vuelve al final de la cola
+            logProcessPreempted(base, timeNow, &p[idx]);
+            queue[rear++] = idx;
         } else {
+            // Si termino, calculamos las metricas finales
+            p[idx].completion = timeNow;
+            p[idx].turnaround = p[idx].completion - p[idx].arrival;
+            p[idx].waiting = p[idx].turnaround - p[idx].burst;
             completed++;
-            p[i].completion = time;
-            p[i].turnaround = time - p[i].arrival;
-            p[i].waiting = p[i].turnaround - p[i].burst;
 
-            printf("Time %d: Process %d completed\n", time, p[i].id);
+            logProcessEvent(base, timeNow, &p[idx], "Completed");
         }
     }
 
-    printStats(p);
+    printGanttChart(gantt, ganttCount);
+    printStats(p, n);
 }

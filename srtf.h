@@ -1,8 +1,5 @@
 #ifndef SRTF_H
 #define SRTF_H
-
 #include "process.h"
-
-void SRTF(Process p[]);
-
+void SRTF(Process p[], int n);
 #endif
